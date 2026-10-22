@@ -1,0 +1,84 @@
+title = "Secure JS/TS Template Betterleaks Config"
+
+# GLOBAL ALLOWLIST
+# This block prevents false positives across all rules (built-in and custom), 
+# saving CI/CD time and developer headaches.
+
+[allowlist]
+description = "Global allowlist for testing, mocks, tooling, and lockfiles"
+
+# Ignore specific paths that commonly contain fake secrets or dependencies
+paths = [
+    # Dependencies (Dependencies are scanned via `pnpm audit` instead)
+    '''^node_modules/.*''',
+    '''^\.pnpm-store/.*''',
+    '''pnpm-lock\.yaml''',
+    '''package-lock\.json''',
+    '''yarn\.lock''',
+    
+    # Local Tooling (Ignores the downloaded Betterleaks binary)
+    '''^\.bin/.*''',
+
+    # Testing & Mock data (Where dummy secrets are usually stored)
+    '''^tests/.*''',
+    '''^__tests__/.*''',
+    '''^__mocks__/.*''',
+    '''^spec/.*''',
+    '''^cypress/.*''',
+    '''^playwright/.*''',
+    '''^\.storybook/.*''',
+
+    # Audit files (We track the bypass log, but it won't contain actual secrets)
+    '''^\.bypass-audit\.log'''  
+]
+
+# Ignore specific placeholder strings that regex engines often misidentify as secrets
+regexes = [
+    '''EXAMPLE_SECRET_.*''',
+    '''CHANGEME.*''',
+    '''YOUR_API_KEY_HERE''',
+    '''YOUR_TOKEN_HERE''',
+    '''00000000-0000-0000-0000-000000000000''',
+    '''dummy[A-Za-z0-9_-]{20,}''',
+    '''fake[A-Za-z0-9_-]{20,}'''
+]
+
+# CUSTOM INTERNAL RULES (Optional)
+# Betterleaks will run these alongside its default massive ruleset.
+
+[[rules]]
+id = "internal-company-token"
+description = "Internal Company API Token"
+# E.g., catches tokens looking like "mycomp_prod_abc123..."
+regex = '''mycomp_(prod|test|dev)_[a-zA-Z0-9]{32}'''
+keywords = ["mycomp_prod", "mycomp_test", "mycomp_dev"]
+
+# Betterleaks exclusive: CEL (Common Expression Language) filters.
+# Drops the finding if the matched secret contains the word "TESTING".
+filter = '''
+  finding["secret"] contains "TESTING"
+'''
+
+# SUPABASE SECRETS
+
+[[rules]]
+id = "supabase-jwt-token"
+description = "Supabase API Key (Anon or Service Role JWT)"
+# Matches the exact HS256 JWT header Supabase uses, followed by Base64 payloads 
+# that contain fragments of "supabase", "service_role", or "anon".
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJ[a-zA-Z0-9_-]*(?:InN1cGFiYXNl|c2VydmljZV9yb2xl|YW5vbg|ImFub24i)[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]+'''
+keywords = ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"]
+
+[[rules]]
+id = "supabase-db-url"
+description = "Supabase PostgreSQL Connection String (Contains DB Password)"
+# Matches postgres://[user]:[password]@[host].supabase.co:[port]/[db]
+regex = '''(?i)(?:postgres(?:ql)?:\/\/)(?:[^:]+):([^@]+)@(?:db\.[a-z0-9]+\.supabase\.co|[a-z0-9\-\.]+\.pooler\.supabase\.com):[0-9]{2,5}\/[a-zA-Z0-9_]+'''
+keywords = ["supabase.co", "pooler.supabase.com", "postgres://", "postgresql://"]
+
+[[rules]]
+id = "supabase-project-ref"
+description = "Supabase Project URL (Optional strict check)"
+# Warns if you hardcode your exact project URL. 
+regex = '''(?i)https:\/\/[a-z0-9]{20}\.supabase\.co'''
+keywords = ["supabase.co"]

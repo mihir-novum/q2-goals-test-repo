@@ -1,0 +1,21 @@
+image: node:22
+
+pipelines:
+  pull-requests:
+    "**": &ci-steps
+      - step:
+          name: Code Quality and Security Validation
+          caches:
+            - node
+          script:
+            - corepack enable pnpm
+            - ./scripts/setup.sh
+            - pnpm run scan:secrets:all --redact
+            - pnpm run format:check
+            - pnpm run lint
+            - pnpm run typecheck
+            - pnpm run test
+            - pnpm run scan:vuln
+  branches:
+    main: *ci-steps
+    develop: *ci-steps

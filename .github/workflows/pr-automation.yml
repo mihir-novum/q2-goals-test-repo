@@ -1,0 +1,279 @@
+name: PR Automation
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  find-pull-requests:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr_numbers: ${{ steps.find.outputs.pr_numbers }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Find open pull requests for this CI head
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          PR_EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          gh api --method GET --paginate --slurp \
+            "repos/${REPOSITORY}/pulls" \
+            -f state=open \
+            -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+            > .open-pull-requests.json
+          OPEN_PULL_REQUESTS_PATH=.open-pull-requests.json \
+            node scripts/find-pr-numbers.mjs
+
+  automate-pull-request:
+    needs: find-pull-requests
+    if: needs.find-pull-requests.result == 'success' && needs.find-pull-requests.outputs.pr_numbers != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pr_number: ${{ fromJSON(needs.find-pull-requests.outputs.pr_numbers) }}
+    permissions:
+      contents: read
+      checks: read
+      issues: write
+      pull-requests: write
+    env:
+      PR_EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      PR_NUMBER: ${{ matrix.pr_number }}
+      REPOSITORY: ${{ github.repository }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fetch pull request metadata, changed files, and CI results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > .pr-details.json
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            > .pr-changed-files-pages.json
+          jq '[.[][] | .filename]' .pr-changed-files-pages.json \
+            > .pr-changed-files.json
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/commits/${PR_EXPECTED_HEAD_SHA}/check-runs" \
+            > .pr-check-runs.json
+
+      - name: Evaluate PR policy and verified check results
+        id: policy
+        env:
+          GATE_CHECK_RUNS_PATH: .pr-check-runs.json
+          PR_CHANGED_FILES_PATH: .pr-changed-files.json
+          PR_DETAILS_PATH: .pr-details.json
+        run: |
+          set -eu
+          check_status() {
+            jq -r --arg check_name "$1" '
+              [.[] | .check_runs[]? | select(.name == $check_name)]
+              | sort_by(.completed_at // .started_at // .created_at)
+              | last
+              | if . == null or .status != "completed"
+                then "not_run"
+                else (.conclusion // "not_run")
+                end
+            ' "$GATE_CHECK_RUNS_PATH"
+          }
+          export GATE_SECRETS="$(check_status 'Secret Scan')"
+          export GATE_FORMAT="$(check_status 'Format')"
+          export GATE_LINT="$(check_status 'Lint')"
+          export GATE_TYPES="$(check_status 'Type Check')"
+          export GATE_TESTS="$(check_status 'Unit Tests')"
+          export GATE_VULN="$(check_status 'Dependency Audit')"
+          node scripts/pr-review-engine.mjs
+
+      - name: Check optional AI credentials
+        id: ai-credentials
+        if: steps.policy.outputs.ai_summary_enabled == 'true' && steps.policy.outputs.pr_head_current == 'true' && steps.policy.outputs.pr_is_open == 'true'
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [ -n "$COPILOT_GITHUB_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch bounded pull request diff for AI summary
+        id: ai-diff
+        if: steps.ai-credentials.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" \
+            -H "Accept: application/vnd.github.diff" > .pr-diff-full.patch
+          head -c 51200 .pr-diff-full.patch > .pr-diff.patch
+
+      - name: Install GitHub Copilot CLI
+        id: copilot-cli
+        if: steps.ai-diff.outcome == 'success'
+        continue-on-error: true
+        run: npm install --global @github/copilot@1.0.102
+
+      - name: Generate AI change summary
+        id: ai-summary
+        if: steps.copilot-cli.outcome == 'success'
+        continue-on-error: true
+        uses: actions/ai-inference@41caef41a74eb26f6d0c6b1e9941d691588e0b2b
+        with:
+          prompt-file: ./.github/prompts/pr-summary.prompt.yml
+          file_input: |
+            diff: ./.pr-diff.patch
+          model: ${{ steps.policy.outputs.ai_summary_model }}
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Add AI summary or report why it was skipped
+        if: always() && steps.policy.outcome == 'success'
+        env:
+          AI_SUMMARY_FILE: ${{ steps.ai-summary.outputs.response-file }}
+          AI_SUMMARY_OUTCOME: ${{ steps.ai-summary.outcome }}
+          AI_DIFF_OUTCOME: ${{ steps.ai-diff.outcome }}
+          COPILOT_CLI_OUTCOME: ${{ steps.copilot-cli.outcome }}
+          AI_TOKEN_AVAILABLE: ${{ steps.ai-credentials.outputs.available }}
+          AI_SUMMARY_ENABLED: ${{ steps.policy.outputs.ai_summary_enabled }}
+          PR_HEAD_CURRENT: ${{ steps.policy.outputs.pr_head_current }}
+        run: |
+          set -eu
+          if [ "$AI_SUMMARY_ENABLED" != "true" ]; then
+            exit 0
+          fi
+          if [ "$PR_HEAD_CURRENT" != "true" ]; then
+            printf '\n### ✨ AI-Generated Change Summary\n\nAI summary skipped: CI results are stale for the current PR head.\n' >> .pr-summary.md
+          elif [ "$AI_TOKEN_AVAILABLE" != "true" ]; then
+            printf '\n### ✨ AI-Generated Change Summary\n\nAI summary skipped: `COPILOT_GITHUB_TOKEN` is not configured.\n' >> .pr-summary.md
+          elif [ "$AI_DIFF_OUTCOME" != "success" ]; then
+            printf '\n### ✨ AI-Generated Change Summary\n\nAI summary unavailable: the diff could not be fetched; see the workflow logs.\n' >> .pr-summary.md
+          elif [ "$COPILOT_CLI_OUTCOME" != "success" ]; then
+            printf '\n### ✨ AI-Generated Change Summary\n\nAI summary unavailable: Copilot CLI installation failed; see the workflow logs.\n' >> .pr-summary.md
+          elif [ "$AI_SUMMARY_OUTCOME" = "success" ] && [ -n "$AI_SUMMARY_FILE" ]; then
+            printf '\n### ✨ AI-Generated Change Summary\n\n' >> .pr-summary.md
+            cat "$AI_SUMMARY_FILE" >> .pr-summary.md
+          else
+            printf '\n### ✨ AI-Generated Change Summary\n\nAI summary unavailable; see the inference step logs.\n' >> .pr-summary.md
+          fi
+
+      - name: Check optional approval credentials
+        id: app-credentials
+        if: steps.policy.outputs.auto_approval_eligible == 'true' && steps.policy.outputs.pr_is_same_repository == 'true' && steps.policy.outputs.pr_is_open == 'true'
+        env:
+          APP_ID: ${{ secrets.PR_AUTOMATION_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.PR_AUTOMATION_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report missing approval credentials
+        if: steps.policy.outputs.auto_approval_eligible == 'true' && steps.policy.outputs.pr_is_same_repository == 'true' && steps.policy.outputs.pr_is_open == 'true' && steps.app-credentials.outputs.available != 'true'
+        run: |
+          printf '\nAutomated approval skipped: configure `PR_AUTOMATION_APP_ID` and `PR_AUTOMATION_APP_PRIVATE_KEY` to enable it.\n' >> .pr-summary.md
+
+      - name: Update human-review label and post summary
+        if: always() && steps.policy.outcome == 'success' && steps.policy.outputs.pr_is_open == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_HUMAN_REVIEW: ${{ steps.policy.outputs.needs_human_review }}
+        run: |
+          set -eu
+          labels_json=$(gh api --paginate --slurp \
+            "repos/${REPOSITORY}/labels?per_page=100" --jq 'add')
+          if ! printf '%s' "$labels_json" | jq -e \
+            'any(.[]; .name == "needs-human-review")' > /dev/null; then
+            gh api --method POST "repos/${REPOSITORY}/labels" \
+              -f name=needs-human-review \
+              -f color=F9D0C4 \
+              -f description="Human review required by PR automation policy"
+          fi
+
+          pr_labels=$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" --jq '[.[].name]')
+          if [ "$NEEDS_HUMAN_REVIEW" = "true" ]; then
+            if ! printf '%s' "$pr_labels" | jq -e \
+              'index("needs-human-review") != null' > /dev/null; then
+              gh api --method POST "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+                -f 'labels[]=needs-human-review' > /dev/null
+            fi
+          elif printf '%s' "$pr_labels" | jq -e \
+            'index("needs-human-review") != null' > /dev/null; then
+            gh api --method DELETE \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels/needs-human-review" \
+              > /dev/null
+          fi
+
+          existing_comment_id=$(gh api --paginate --slurp \
+            "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            --jq 'add | map(select(.user.login == "github-actions[bot]" and (.body | contains("<!-- pr-automation-summary -->")))) | last | .id // empty')
+          if [ -n "$existing_comment_id" ]; then
+            gh api --method PATCH \
+              "repos/${REPOSITORY}/issues/comments/${existing_comment_id}" \
+              -f body="$(< .pr-summary.md)" > /dev/null
+          else
+            gh api --method POST \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="$(< .pr-summary.md)" > /dev/null
+          fi
+
+      - name: Create short-lived GitHub App token
+        id: app-token
+        if: >-
+          steps.policy.outputs.auto_approval_eligible == 'true' &&
+          steps.policy.outputs.pr_is_same_repository == 'true' &&
+          steps.policy.outputs.pr_is_open == 'true' &&
+          steps.app-credentials.outputs.available == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PR_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.PR_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Approve eligible pull request
+        if: steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api --method POST "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
+            -f commit_id="$PR_EXPECTED_HEAD_SHA" \
+            -f event=APPROVE \
+            -f body="All required checks passed and no human-review policy was triggered."
+
+      - name: Queue eligible pull request for auto-merge
+        if: steps.app-token.outputs.token != '' && steps.policy.outputs.auto_merge_enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --auto

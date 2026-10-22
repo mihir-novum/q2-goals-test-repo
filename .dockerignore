@@ -1,0 +1,27 @@
+### IDEs
+.idea
+.vscode
+.git
+.github
+.husky
+
+### Development Artifacts
+node_modules
+.env
+.env.*
+.bypass-audit.log
+coverage
+
+### Build Artifacts
+targets
+build
+dist
+out
+
+
+### Next.js
+.next
+next-env.d.ts
+
+### Typescript
+*.tsbuildinfo

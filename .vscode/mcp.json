@@ -1,0 +1,34 @@
+{
+  "inputs": [
+    {
+      "id": "database-dsn",
+      "type": "promptString",
+      "description": "Local development database DSN (use a least-privilege MCP account)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "jira": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v2/mcp"
+    },
+    "database": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@bytebase/dbhub@1.5.0",
+        "--dsn",
+        "${input:database-dsn}"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "🚀 Running pre-push checks (Mirroring CI)..."
+
+pnpm run scan:secrets:all --redact
+pnpm run format:check
+pnpm run lint
+pnpm run typecheck
+pnpm run test
+pnpm run scan:vuln
+
+echo "✅ Pre-push checks passed!"

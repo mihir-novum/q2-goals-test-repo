@@ -1,0 +1,58 @@
+# PR Automation & Review Policy Configuration
+# Policy is read from the trusted base branch, not from the pull request head.
+
+version: "1"
+
+# These actions run only for same-repository PRs and require an installed GitHub
+# App with pull-requests:write permission and the two listed Actions secrets.
+auto_approval:
+  enabled: true
+
+# GitHub repository auto-merge must also be enabled.
+auto_merge:
+  enabled: true
+  method: squash
+
+# Requires COPILOT_GITHUB_TOKEN. PR diffs are sent to GitHub Copilot.
+ai_summary:
+  enabled: true
+  model: gpt-4.1
+
+# Criteria that trigger a human review notification.
+human_review:
+  # When true, all PRs require human review regardless of files touched
+  always_require: false
+
+  # Flag paths matching .github/CODEOWNERS for human review.
+  use_codeowners: true
+
+  # Glob patterns for sensitive files that MUST be reviewed by a human
+  sensitive_paths:
+    - ".github/workflows/**"
+    - ".github/actions/**"
+    - ".github/prompts/**"
+    - ".github/CODEOWNERS"
+    - ".github/pr-automation.yml"
+    - ".github/copilot-instructions.md"
+    - ".mcp.json"
+    - ".vscode/mcp.json"
+    - "AGENTS.md"
+    - "Dockerfile"
+    - ".devcontainer/**"
+    - "docker-compose.yml"
+    - "docker-compose*.yml"
+    - "eslint.config.*"
+    - "vitest.config.*"
+    - "next.config.*"
+    - "package.json"
+    - "pnpm-workspace.yaml"
+    - "pnpm-lock.yaml"
+    - "tsconfig.json"
+    - ".betterleaks.toml"
+    - "scripts/**"
+
+  # These labels require review. The needs-human-review label is managed by CI.
+  require_on_labels:
+    - "security"
+    - "do-not-merge"
+    - "wip"
