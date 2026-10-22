@@ -22,6 +22,7 @@ fixture; use a synthetic canary only.
 - Demo repository: <https://github.com/mihir-novum/q2-goals-test-repo>
 - Baseline commit: <https://github.com/mihir-novum/q2-goals-test-repo/commit/a2c0daa>
 - Initial CI run: <https://github.com/mihir-novum/q2-goals-test-repo/actions/runs/39794667505>
+- Evidence update PR: <https://github.com/mihir-novum/q2-goals-test-repo/pull/1>
 - Branch rules: <https://github.com/mihir-novum/q2-goals-test-repo/rules?ref=refs/heads/main>
 - The active `main` ruleset requires `Secret Scan`, `Format`, `Lint`, `Type Check`,
   `Unit Tests`, and `Dependency Audit`, requires one PR approval, prohibits
@@ -29,6 +30,9 @@ fixture; use a synthetic canary only.
 - A direct push attempt to `main` was rejected with `GH013` ("Changes must be
   made through a pull request"; six required status checks expected). Local
   pre-push checks passed before GitHub rejected the update.
+- The baseline CI run completed with all six jobs successful. PR #1 is open;
+  its change to `scripts/**` is intentionally covered by the human-review
+  policy and the branch ruleset's required approval.
 - On the first dependency download, `pnpm install --frozen-lockfile` took
   33.4 seconds. A separate clean clone with the local pnpm store warm completed
   install in 1.7 seconds and `scripts/setup.sh` installed Betterleaks. The
@@ -38,6 +42,9 @@ fixture; use a synthetic canary only.
 - The local baseline passed formatting, lint, typecheck, all 18 unit tests,
   secret scan, direct dependency audit, and production build. A clean clone
   started the Next.js dev server and returned the expected page over HTTP.
+- Betterleaks detected a synthetic, nonfunctional GitHub-token-shaped canary
+  in a temporary local fixture. The fixture was removed immediately; no canary
+  was committed or pushed.
 - All six jobs in the initial GitHub CI run completed successfully.
 - The initial dependency download took 33.4 seconds. The separate clean clone's
   install used a warm local package store; the end-to-end flow took a few
