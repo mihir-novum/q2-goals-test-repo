@@ -6,16 +6,16 @@ fixture; use a synthetic canary only.
 
 ## Current evidence
 
-| Goal                                                         | Acceptance evidence                                                                                                                                                             | Status                                               |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Fresh clone and runnable project in under 30 minutes         | Clean-clone setup, install, checks, production build, and dev-server HTTP smoke test completed by the current operator. Independent first-time tester timing is still required. | Operator-validated; independent validation pending   |
-| At least two MCP integrations working and documented         | GitHub MCP listed both workflows in this repository; Atlassian MCP returned the authorized Jira site. Setup is documented in `docs/SETUP.md`.                                   | Verified for current operator                        |
-| Push and PR enforcement                                      | Active `main` ruleset requires six exact checks and has no bypass actors. Direct push to `main` was rejected by GitHub after local pre-push checks passed.                      | Direct push verified; failing-PR test matrix pending |
-| 8–10 deliberately failing changes including a planted secret | Use a synthetic canary only; retain PR/check-run URLs and confirm there is no approval/merge.                                                                                   | Not run                                              |
-| Named, logged bypass                                         | Demonstrate a pre-approved bypass with approver identity, reason, timestamp, and durable audit record; verify an unapproved attempt is rejected.                                | Not implemented/verified in demo yet                 |
-| 15+ passing PRs auto-approved without human action           | After configuring an isolated GitHub App and secrets, record PR, head SHA, all gate results, App review, and merge eligibility for each trial.                                  | Blocked: GitHub App secrets not configured           |
-| Failing PRs are never auto-approved                          | For every failing trial, capture failed check and absence of approval; include stale-head, draft, fork, and sensitive-path cases.                                               | Not run                                              |
-| Human-review stage toggles per repository                    | Test policy enabled and disabled in separate controlled runs. A change to trusted policy takes effect after it is on the default branch.                                        | Not run                                              |
+| Goal                                                         | Acceptance evidence                                                                                                                                                               | Status                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Fresh clone and runnable project in under 30 minutes         | Clean-clone setup, install, checks, production build, and dev-server HTTP smoke test completed by the current operator. Independent first-time tester timing is still required.   | Operator-validated; independent validation pending      |
+| At least two MCP integrations working and documented         | GitHub MCP listed both workflows in this repository; Atlassian MCP returned the authorized Jira site. Setup is documented in `docs/SETUP.md`.                                     | Verified for current operator                           |
+| Push and PR enforcement                                      | Active `main` ruleset requires six exact checks and has no bypass actors. Direct push to `main` was rejected by GitHub after local pre-push checks passed.                        | Direct push verified; failing-PR test matrix pending    |
+| 8–10 deliberately failing changes including a planted secret | Use a synthetic canary only; retain PR/check-run URLs and confirm there is no approval/merge.                                                                                     | Not run                                                 |
+| Named, logged bypass                                         | Protected GitHub Environment selected as the approval mechanism. A reviewer other than the workflow requester must be configured; no independent reviewer is currently available. | Blocked pending independent approver and implementation |
+| 15+ passing PRs auto-approved without human action           | After configuring an isolated GitHub App and secrets, record PR, head SHA, all gate results, App review, and merge eligibility for each trial.                                    | Blocked: GitHub App secrets not configured              |
+| Failing PRs are never auto-approved                          | For every failing trial, capture failed check and absence of approval; include stale-head, draft, fork, and sensitive-path cases.                                                 | Not run                                                 |
+| Human-review stage toggles per repository                    | Test policy enabled and disabled in separate controlled runs. A change to trusted policy takes effect after it is on the default branch.                                          | Not run                                                 |
 
 ## Recorded baseline
 
@@ -81,10 +81,13 @@ fixture; use a synthetic canary only.
 4. Configure `COPILOT_GITHUB_TOKEN` only if AI summaries are part of the
    demonstration.
 5. Confirm `PR_AUTOMATION` can read check runs and update PR comments/labels.
-6. Agree on the named approval and audit mechanism for any bypass before
-   testing that path. The template's existing local bypass scripts record an
-   actor, timestamp, and reason but do not independently validate an external
-   approver; do not claim the named-approval criterion is satisfied by them.
+6. Configure a protected `bypass-approval` GitHub Environment with at least
+   one named reviewer other than the workflow requester, and enable
+   self-review prevention. The demo owner is currently the only available
+   reviewer, so the named-approval criterion is blocked. The template's local
+   bypass scripts record an actor, timestamp, and reason but do not
+   independently validate an external approver; do not claim that they satisfy
+   this criterion.
 
 ## Sign-off
 
