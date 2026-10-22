@@ -76,7 +76,8 @@ function run_gh(args, input) {
 }
 
 function configure_branch_protection() {
-  const branch = process.argv[2];
+  const args = process.argv.slice(2).filter((argument) => argument !== "--");
+  const branch = args[0];
   if (
     !branch ||
     branch.startsWith("-") ||
@@ -89,7 +90,7 @@ function configure_branch_protection() {
     );
   }
 
-  const require_codeowner_reviews = process.argv.includes("--codeowners");
+  const require_codeowner_reviews = args.includes("--codeowners");
   const repository = run_gh([
     "repo",
     "view",
